@@ -1,21 +1,21 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import yt_dlp as youtube_dl
+import yt_dlp
 import asyncio
 import os
 import logging
-import re
-import ssl
-import certifi
 import subprocess
 import sys
 from datetime import datetime
 
-# Принудительное обновление yt-dlp
+# Отключаем SSL
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
+# Обновляем yt-dlp
 def update_ytdlp():
     try:
-        print("🔄 Проверка обновлений yt-dlp...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"])
         print("✅ yt-dlp обновлен")
     except:
@@ -23,38 +23,13 @@ def update_ytdlp():
 
 update_ytdlp()
 
-# Исправление SSL ошибок
-try:
-    ssl._create_default_https_context = ssl._create_unverified_context
-    print("✅ SSL проверка отключена")
-except:
-    pass
-
-# Устанавливаем сертификаты
-os.environ['SSL_CERT_FILE'] = certifi.where()
-os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
-
-# Создаем файл куков для YouTube (помогает обойти блокировки)
-def create_cookie_file():
-    try:
-        with open('cookies.txt', 'w') as f:
-            f.write("# Netscape HTTP Cookie File\n")
-            f.write(".youtube.com\tTRUE\t/\tTRUE\t1735689600\tCONSENT\tYES+1\n")
-            f.write(".youtube.com\tTRUE\t/\tTRUE\t1735689600\t__Secure-3PSIDCC\tAIKvawXx\n")
-            f.write(".youtube.com\tTRUE\t/\tTRUE\t1735689600\t__Secure-3PAPISID\tAIKvawXx\n")
-            f.write(".youtube.com\tTRUE\t/\tTRUE\t1735689600\t__Secure-3PSID\tAIKvawXx\n")
-        print("✅ Cookie файл создан")
-    except:
-        print("⚠️ Не удалось создать cookie файл")
-
-create_cookie_file()
-
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Настройки для YouTube/SoundCloud с обходом блокировок
+# Оптимальные настройки для YouTube
 ytdl_format_options = {
-    'format': 'bestaudio/best',
+    'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
@@ -62,188 +37,80 @@ ytdl_format_options = {
     'logtostderr': False,
     'quiet': True,
     'no_warnings': True,
-    'default_search': 'auto',
+    'default_search': 'ytsearch5',  # Ищем 5 результатов для выбора
     'source_address': '0.0.0.0',
-    'extract_flat': False,
-    'force-ipv4': True,
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'cookiefile': 'cookies.txt',
     'geo_bypass': True,
-    'geo_bypass_country': 'US',  # Обход гео-блокировок через US
-    'geo_bypass_ip_block': None,
+    'geo_bypass_country': 'US',
     'extractor_args': {
         'youtube': {
-            'player_client': ['android', 'web', 'ios', 'tv'],  # Все возможные клиенты
-            'skip': ['hls', 'dash'],  # Пропускаем проблемные форматы
-            'include_dash_manifest': False,
-            'include_hls_manifest': False,
-        },
-        'soundcloud': {
-            'formats': 'bestaudio/best',
+            'player_client': ['android', 'web'],
         }
     },
     'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'en-us,en;q=0.5',
-        'Sec-Fetch-Mode': 'navigate',
-        'Connection': 'keep-alive',
-    },
-    'youtube_include_dash_manifest': False,
-    'extractor_retries': 3,  # Количество попыток
-    'fragment_retries': 3,
-    'retry_sleep': 3,
-    'file_access_retries': 3,
+    }
 }
-
-# Список прокси (если есть возможность добавить прокси, иначе оставить пустым)
-PROXY_LIST = [
-    # 'http://proxy1:port',
-    # 'http://proxy2:port',
-    # 'socks5://proxy3:port',
-]
-
-# Добавляем прокси если есть
-if PROXY_LIST:
-    import random
-    ytdl_format_options['proxy'] = random.choice(PROXY_LIST)
 
 ffmpeg_options = {
     'options': '-vn',
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
 }
 
-ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
-
-# Альтернативный метод загрузки через разные домены
-def get_alternative_urls(url):
-    """Генерирует альтернативные URL для обхода блокировок"""
-    alternatives = [url]
-    
-    if 'youtube.com' in url or 'youtu.be' in url:
-        # Пробуем разные домены YouTube
-        video_id = None
-        if 'youtube.com/watch?v=' in url:
-            video_id = url.split('watch?v=')[1].split('&')[0]
-        elif 'youtu.be/' in url:
-            video_id = url.split('youtu.be/')[1].split('?')[0]
-        
-        if video_id:
-            alternatives.append(f"https://www.youtube-nocookie.com/watch?v={video_id}")
-            alternatives.append(f"https://youtube.googleapis.com/watch?v={video_id}")
-            alternatives.append(f"https://www.youtube.com/embed/{video_id}")
-            alternatives.append(f"ytsearch:{video_id}")
-    
-    elif 'soundcloud.com' in url:
-        # Для SoundCloud пробуем разные подходы
-        alternatives.append(url.replace('soundcloud.com', 'm.soundcloud.com'))
-    
-    return alternatives
-
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
         self.data = data
         self.title = data.get('title', 'Неизвестно')
-        self.url = data.get('url', '')
+        self.url = data.get('webpage_url', '')
         self.duration = data.get('duration', 0)
-        self.uploader = data.get('uploader', data.get('channel', 'Неизвестно'))
-        self.thumbnail = data.get('thumbnail', data.get('thumbnails', [{}])[-1].get('url') if data.get('thumbnails') else None)
+        self.uploader = data.get('uploader', 'Неизвестно')
+        self.thumbnail = data.get('thumbnail', '')
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
         
-        # Пробуем разные варианты если это не ссылка
-        search_query = url
-        if not url.startswith('http'):
-            search_query = f"ytsearch:{url}"
-        
-        # Получаем альтернативные URL для обхода блокировок
-        urls_to_try = get_alternative_urls(search_query)
-        
-        for attempt, try_url in enumerate(urls_to_try, 1):
-            try:
-                print(f"🔍 Попытка {attempt}: {try_url}")
-                
-                # Добавляем задержку между попытками
-                if attempt > 1:
-                    await asyncio.sleep(2)
-                
-                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(try_url, download=not stream))
-                
-                if data is None:
-                    print(f"❌ Попытка {attempt}: yt-dlp вернул None")
-                    continue
-                    
-                if 'entries' in data:
-                    # Берем первый трек из плейлиста или поиска
-                    if len(data['entries']) > 0:
-                        data = data['entries'][0]
-                    else:
-                        print(f"❌ Попытка {attempt}: Пустой плейлист/поиск")
-                        continue
-                
-                filename = data['url'] if stream else ytdl.prepare_filename(data)
-                print(f"✅ Успешно загружено: {data.get('title', 'Неизвестно')}")
-                return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
-                
-            except Exception as e:
-                print(f"❌ Попытка {attempt} ошибка: {str(e)[:100]}")
-                continue
-        
-        print("❌ Все попытки загрузки не удались")
-        return None
-
-def extract_spotify_info(url):
-    """Извлечение информации из Spotify ссылки"""
-    if not SPOTIFY_ENABLED:
-        return None
-    
-    try:
-        # Определяем тип контента
-        if 'track' in url:
-            track_id = url.split('track/')[-1].split('?')[0]
-            track = spotify_client.track(track_id)
+        try:
+            # Создаем новый экземпляр для каждого запроса
+            ydl = yt_dlp.YoutubeDL(ytdl_format_options)
             
-            artists = ', '.join([artist['name'] for artist in track['artists']])
-            query = f"{artists} - {track['name']}"
-            return {
-                'type': 'track',
-                'query': query,
-                'title': f"{artists} - {track['name']}"
-            }
+            # Извлекаем информацию
+            data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
             
-        elif 'playlist' in url:
-            playlist_id = url.split('playlist/')[-1].split('?')[0]
-            playlist = spotify_client.playlist(playlist_id)
-            return {
-                'type': 'playlist',
-                'name': playlist['name'],
-                'tracks': [
-                    f"{track['track']['artists'][0]['name']} - {track['track']['name']}"
-                    for track in playlist['tracks']['items'][:10]
-                ]
-            }
+            if not data:
+                return None
             
-        elif 'album' in url:
-            album_id = url.split('album/')[-1].split('?')[0]
-            album = spotify_client.album(album_id)
-            return {
-                'type': 'album',
-                'name': album['name'],
-                'tracks': [
-                    f"{album['artists'][0]['name']} - {track['name']}"
-                    for track in album['tracks']['items'][:10]
-                ]
-            }
-    except Exception as e:
-        logging.error(f"Ошибка Spotify: {e}")
-        return None
-
-def is_url(string):
-    """Проверка является ли строка URL"""
-    url_pattern = re.compile(r'https?://(?:www\.)?\S+')
-    return bool(url_pattern.match(string))
+            # Обрабатываем результаты поиска
+            if 'entries' in data:
+                if not data['entries']:
+                    return None
+                
+                # Берем первый результат
+                data = data['entries'][0]
+                
+                # Проверяем, что результат действительно соответствует запросу
+                # (можно добавить дополнительную фильтрацию здесь)
+            
+            if not data or 'url' not in data:
+                return None
+            
+            # Получаем прямую ссылку на аудио
+            audio_url = data['url']
+            if 'formats' in data:
+                # Ищем лучший аудиоформат
+                audio_formats = [f for f in data['formats'] if f.get('vcodec') == 'none']
+                if audio_formats:
+                    audio_formats.sort(key=lambda f: f.get('tbr', 0), reverse=True)
+                    audio_url = audio_formats[0]['url']
+            
+            print(f"✅ Найдено: {data.get('title')}")
+            return cls(discord.FFmpegPCMAudio(audio_url, **ffmpeg_options), data=data)
+            
+        except Exception as e:
+            print(f"❌ Ошибка: {str(e)[:200]}")
+            return None
 
 # Настройка бота
 intents = discord.Intents.default()
@@ -256,7 +123,7 @@ class MusicBot(commands.Bot):
     
     async def setup_hook(self):
         await self.tree.sync()
-        print(f"✅ Слэш-команды синхронизированы")
+        print("✅ Слэш-команды синхронизированы")
 
 bot = MusicBot()
 
@@ -268,511 +135,215 @@ def get_queue(guild_id):
         queues[guild_id] = []
     return queues[guild_id]
 
-# ==================== СОБЫТИЯ ====================
-
 @bot.event
 async def on_ready():
     print(f'\n{"="*50}')
-    print(f'✅ Музыкальный бот {bot.user} запущен!')
-    print(f'{"="*50}')
+    print(f'✅ Бот {bot.user} запущен!')
     print(f'📋 На серверах: {len(bot.guilds)}')
-    print(f'🎵 Поддержка: YouTube, SoundCloud (с обходом блокировок)')
     print(f'{"="*50}\n')
-    
-    await bot.change_presence(activity=discord.Game(name="/help | /play"))
+    await bot.change_presence(activity=discord.Game(name="/play | !play"))
 
-# ==================== СЛЭШ-КОМАНДЫ ====================
-
-@bot.tree.command(name="play", description="🎵 Воспроизвести музыку (YouTube, SoundCloud)")
+# Основная команда play
+@bot.tree.command(name="play", description="🎵 Воспроизвести музыку")
 async def slash_play(interaction: discord.Interaction, запрос: str):
-    """Воспроизвести музыку по ссылке или названию"""
-    
+    # Проверка голосового канала
     if not interaction.user.voice:
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description="Вы должны находиться в голосовом канале!",
-            color=0xe74c3c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message("❌ Вы должны быть в голосовом канале!", ephemeral=True)
         return
     
     await interaction.response.defer()
     
-    channel = interaction.user.voice.channel
-    voice_client = interaction.guild.voice_client
-    
     # Подключение к голосовому каналу
     try:
+        channel = interaction.user.voice.channel
+        voice_client = interaction.guild.voice_client
+        
         if voice_client:
-            if voice_client.channel == channel:
-                pass
-            else:
+            if voice_client.channel != channel:
                 await voice_client.move_to(channel)
         else:
-            voice_client = await channel.connect(timeout=20.0, reconnect=True)
+            voice_client = await channel.connect(timeout=30.0)
     except Exception as e:
-        embed = discord.Embed(
-            title="❌ Ошибка подключения",
-            description=f"Не удалось подключиться: {str(e)[:100]}",
-            color=0xe74c3c
-        )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(f"❌ Ошибка подключения: {str(e)[:100]}")
         return
     
-    embed = discord.Embed(
-        title="🔍 Поиск...",
-        description=f"Ищем: **{запрос}**",
-        color=0x3498db
-    )
-    await interaction.followup.send(embed=embed)
-    
+    # Поиск и воспроизведение
     try:
-        player = await YTDLSource.from_url(запрос, loop=bot.loop, stream=True)
+        await interaction.followup.send(f"🔍 Ищу: **{запрос}**...")
         
-        if player is None:
-            embed = discord.Embed(
-                title="❌ Ошибка",
-                description="Не удалось найти трек. Возможные причины:\n"
-                          "• Видео заблокировано в РФ\n"
-                          "• Проблемы с сетью\n"
-                          "• Неверная ссылка\n\n"
-                          "Попробуйте другую ссылку или название.",
-                color=0xe74c3c
-            )
-            await interaction.followup.send(embed=embed)
+        player = await YTDLSource.from_url(запрос, loop=bot.loop)
+        
+        if not player:
+            await interaction.followup.send("❌ Не удалось найти трек. Попробуйте другое название или ссылку.")
             return
         
         if voice_client.is_playing():
             queue = get_queue(interaction.guild_id)
             queue.append(player)
-            
-            embed = discord.Embed(
-                title="✅ Добавлено в очередь",
-                description=f"**{player.title}**",
-                color=0x2ecc71
-            )
-            embed.add_field(name="Позиция", value=f"```{len(queue)}```", inline=True)
-            if player.duration:
-                minutes = player.duration // 60
-                seconds = player.duration % 60
-                embed.add_field(name="Длительность", value=f"```{minutes}:{seconds:02d}```", inline=True)
-            
-            await interaction.followup.send(embed=embed)
+            await interaction.followup.send(f"✅ Добавлено в очередь: **{player.title}** (позиция {len(queue)})")
         else:
             voice_client.play(player, after=lambda e: after_play(interaction.guild_id))
             
             embed = discord.Embed(
                 title="🎵 Сейчас играет",
                 description=f"**{player.title}**",
-                color=0x9b59b6,
-                timestamp=datetime.now()
+                color=0x2ecc71
             )
-            
             if player.duration:
                 minutes = player.duration // 60
                 seconds = player.duration % 60
-                embed.add_field(name="Длительность", value=f"```{minutes}:{seconds:02d}```", inline=True)
-            
+                embed.add_field(name="Длительность", value=f"{minutes}:{seconds:02d}")
             if player.uploader:
-                embed.add_field(name="Автор", value=f"```{player.uploader}```", inline=True)
-            
+                embed.add_field(name="Автор", value=player.uploader)
             if player.thumbnail:
                 embed.set_thumbnail(url=player.thumbnail)
-            
-            embed.set_footer(text=f"Запросил: {interaction.user.name}")
             
             await interaction.followup.send(embed=embed)
             
     except Exception as e:
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description=f"Произошла ошибка: {str(e)[:200]}",
-            color=0xe74c3c
-        )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(f"❌ Ошибка: {str(e)[:200]}")
 
 def after_play(guild_id):
     queue = get_queue(guild_id)
     if queue:
         next_player = queue.pop(0)
-        for voice_client in bot.voice_clients:
-            if voice_client.guild.id == guild_id:
-                voice_client.play(next_player, after=lambda e: after_play(guild_id))
+        for vc in bot.voice_clients:
+            if vc.guild.id == guild_id:
+                vc.play(next_player, after=lambda e: after_play(guild_id))
                 break
 
-@bot.tree.command(name="pause", description="⏸️ Поставить на паузу")
+# Остальные команды
+@bot.tree.command(name="pause", description="⏸️ Пауза")
 async def slash_pause(interaction: discord.Interaction):
-    voice_client = interaction.guild.voice_client
-    
-    if not voice_client or not voice_client.is_playing():
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description="Сейчас ничего не играет",
-            color=0xe74c3c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    voice_client.pause()
-    
-    embed = discord.Embed(
-        title="⏸️ Пауза",
-        description="Музыка приостановлена",
-        color=0x3498db
-    )
-    await interaction.response.send_message(embed=embed)
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing():
+        vc.pause()
+        await interaction.response.send_message("⏸️ Пауза")
+    else:
+        await interaction.response.send_message("❌ Ничего не играет", ephemeral=True)
 
-@bot.tree.command(name="resume", description="▶️ Продолжить воспроизведение")
+@bot.tree.command(name="resume", description="▶️ Продолжить")
 async def slash_resume(interaction: discord.Interaction):
-    voice_client = interaction.guild.voice_client
-    
-    if not voice_client or not voice_client.is_paused():
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description="Нет трека на паузе",
-            color=0xe74c3c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    voice_client.resume()
-    
-    embed = discord.Embed(
-        title="▶️ Продолжаем",
-        description="Воспроизведение возобновлено",
-        color=0x2ecc71
-    )
-    await interaction.response.send_message(embed=embed)
+    vc = interaction.guild.voice_client
+    if vc and vc.is_paused():
+        vc.resume()
+        await interaction.response.send_message("▶️ Продолжаем")
+    else:
+        await interaction.response.send_message("❌ Нет на паузе", ephemeral=True)
 
-@bot.tree.command(name="skip", description="⏭️ Пропустить текущий трек")
+@bot.tree.command(name="skip", description="⏭️ Пропустить")
 async def slash_skip(interaction: discord.Interaction):
-    voice_client = interaction.guild.voice_client
-    
-    if not voice_client or not voice_client.is_playing():
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description="Сейчас ничего не играет",
-            color=0xe74c3c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    voice_client.stop()
-    
-    embed = discord.Embed(
-        title="⏭️ Трек пропущен",
-        color=0x3498db
-    )
-    await interaction.response.send_message(embed=embed)
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing():
+        vc.stop()
+        await interaction.response.send_message("⏭️ Пропущено")
+    else:
+        await interaction.response.send_message("❌ Ничего не играет", ephemeral=True)
 
-@bot.tree.command(name="stop", description="⏹️ Остановить музыку и отключиться")
+@bot.tree.command(name="stop", description="⏹️ Остановить")
 async def slash_stop(interaction: discord.Interaction):
-    voice_client = interaction.guild.voice_client
-    
-    if not voice_client or not voice_client.is_connected():
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description="Я не в голосовом канале",
-            color=0xe74c3c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    if interaction.guild_id in queues:
-        queues[interaction.guild_id] = []
-    
-    await voice_client.disconnect()
-    
-    embed = discord.Embed(
-        title="👋 Отключился",
-        description="Воспроизведение остановлено",
-        color=0xe74c3c
-    )
-    await interaction.response.send_message(embed=embed)
+    vc = interaction.guild.voice_client
+    if vc:
+        if interaction.guild_id in queues:
+            queues[interaction.guild_id] = []
+        await vc.disconnect()
+        await interaction.response.send_message("👋 Отключился")
+    else:
+        await interaction.response.send_message("❌ Я не в канале", ephemeral=True)
 
-@bot.tree.command(name="queue", description="📋 Показать очередь песен")
+@bot.tree.command(name="queue", description="📋 Очередь")
 async def slash_queue(interaction: discord.Interaction):
     queue = get_queue(interaction.guild_id)
-    voice_client = interaction.guild.voice_client
-    
-    embed = discord.Embed(
-        title="📋 Очередь воспроизведения",
-        color=0x9b59b6,
-        timestamp=datetime.now()
-    )
-    
-    if voice_client and voice_client.is_playing() and hasattr(voice_client.source, 'title'):
-        current = voice_client.source
-        current_text = f"**{current.title}**"
-        if hasattr(current, 'duration') and current.duration:
-            minutes = current.duration // 60
-            seconds = current.duration % 60
-            current_text += f" ({minutes}:{seconds:02d})"
-        embed.add_field(name="🎵 Сейчас играет", value=current_text, inline=False)
-    else:
-        embed.add_field(name="🎵 Сейчас играет", value="```Ничего```", inline=False)
+    embed = discord.Embed(title="📋 Очередь", color=0x3498db)
     
     if queue:
-        queue_text = ""
-        total_duration = 0
-        
-        for i, track in enumerate(queue[:10], 1):
-            track_text = f"{i}. **{track.title}**"
-            if track.duration:
-                minutes = track.duration // 60
-                seconds = track.duration % 60
-                track_text += f" ({minutes}:{seconds:02d})"
-                total_duration += track.duration
-            queue_text += track_text + "\n"
-        
+        text = "\n".join([f"{i}. {t.title}" for i, t in enumerate(queue[:10], 1)])
         if len(queue) > 10:
-            queue_text += f"... и еще {len(queue) - 10} треков"
-        
-        embed.add_field(name="📌 В очереди:", value=queue_text, inline=False)
-        
-        if total_duration > 0:
-            hours = total_duration // 3600
-            minutes = (total_duration % 3600) // 60
-            if hours > 0:
-                embed.set_footer(text=f"Всего: {len(queue)} треков • {hours}ч {minutes}мин")
-            else:
-                embed.set_footer(text=f"Всего: {len(queue)} треков • {minutes}мин")
+            text += f"\n... и еще {len(queue)-10}"
+        embed.add_field(name="В очереди:", value=text[:1024], inline=False)
     else:
-        embed.add_field(name="📌 В очереди:", value="```Пусто```", inline=False)
+        embed.add_field(name="В очереди:", value="Пусто", inline=False)
     
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="nowplaying", description="ℹ️ Что играет сейчас")
+@bot.tree.command(name="nowplaying", description="ℹ️ Сейчас играет")
 async def slash_nowplaying(interaction: discord.Interaction):
-    voice_client = interaction.guild.voice_client
-    
-    if not voice_client or not voice_client.is_playing() or not hasattr(voice_client.source, 'title'):
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description="Сейчас ничего не играет",
-            color=0xe74c3c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    player = voice_client.source
-    
-    embed = discord.Embed(
-        title="🎵 Сейчас играет",
-        description=f"**{player.title}**",
-        color=0x2ecc71,
-        timestamp=datetime.now()
-    )
-    
-    if player.duration:
-        minutes = player.duration // 60
-        seconds = player.duration % 60
-        embed.add_field(name="Длительность", value=f"```{minutes}:{seconds:02d}```", inline=True)
-    
-    if player.uploader:
-        embed.add_field(name="Автор", value=f"```{player.uploader}```", inline=True)
-    
-    if player.thumbnail:
-        embed.set_thumbnail(url=player.thumbnail)
-    
-    await interaction.response.send_message(embed=embed)
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing() and hasattr(vc.source, 'title'):
+        player = vc.source
+        embed = discord.Embed(title="🎵 Сейчас играет", description=f"**{player.title}**", color=0x2ecc71)
+        await interaction.response.send_message(embed=embed)
+    else:
+        await interaction.response.send_message("❌ Ничего не играет", ephemeral=True)
 
-@bot.tree.command(name="np", description="ℹ️ Что играет сейчас (сокращенно)")
-async def slash_np(interaction: discord.Interaction):
-    await slash_nowplaying(interaction)
-
-@bot.tree.command(name="volume", description="🔊 Изменить громкость (0-100)")
+@bot.tree.command(name="volume", description="🔊 Громкость (0-100)")
 async def slash_volume(interaction: discord.Interaction, громкость: int):
-    voice_client = interaction.guild.voice_client
-    
-    if not voice_client or not voice_client.source:
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description="Сейчас ничего не играет",
-            color=0xe74c3c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    if громкость < 0 or громкость > 100:
-        embed = discord.Embed(
-            title="❌ Ошибка",
-            description="Громкость должна быть от 0 до 100",
-            color=0xe74c3c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    voice_client.source.volume = громкость / 100
-    
-    embed = discord.Embed(
-        title="🔊 Громкость изменена",
-        description=f"Текущая громкость: **{громкость}%**",
-        color=0x3498db
-    )
-    await interaction.response.send_message(embed=embed)
+    vc = interaction.guild.voice_client
+    if vc and vc.source:
+        if 0 <= громкость <= 100:
+            vc.source.volume = громкость / 100
+            await interaction.response.send_message(f"🔊 Громкость: {громкость}%")
+        else:
+            await interaction.response.send_message("❌ Громкость от 0 до 100", ephemeral=True)
+    else:
+        await interaction.response.send_message("❌ Ничего не играет", ephemeral=True)
 
-@bot.tree.command(name="clear", description="🧹 Очистить очередь")
-async def slash_clear(interaction: discord.Interaction):
-    if interaction.guild_id in queues:
-        queues[interaction.guild_id] = []
-    
-    embed = discord.Embed(
-        title="🧹 Очередь очищена",
-        color=0x3498db
-    )
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="help", description="📋 Список команд")
+@bot.tree.command(name="help", description="📋 Помощь")
 async def slash_help(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="📋 ПОМОЩЬ ПО КОМАНДАМ",
-        description="**Музыкальный бот с обходом блокировок РФ**",
-        color=0x9b59b6,
-        timestamp=datetime.now()
+        title="📋 Команды",
+        description="**Музыкальный бот**",
+        color=0x9b59b6
     )
-    
-    embed.add_field(name="🎵 Поддерживаемые платформы", value="YouTube, SoundCloud (с обходом блокировок)", inline=False)
-    
     commands = [
-        ("`/play [запрос]`", "🎵 Воспроизвести (ссылка или название)"),
+        ("`/play [запрос]`", "🎵 Играть музыку"),
         ("`/pause`", "⏸️ Пауза"),
         ("`/resume`", "▶️ Продолжить"),
         ("`/skip`", "⏭️ Пропустить"),
         ("`/stop`", "⏹️ Остановить"),
         ("`/queue`", "📋 Очередь"),
         ("`/nowplaying`", "ℹ️ Что играет"),
-        ("`/np`", "ℹ️ Что играет (сокращенно)"),
         ("`/volume [0-100]`", "🔊 Громкость"),
-        ("`/clear`", "🧹 Очистить"),
         ("`/help`", "📋 Помощь")
     ]
-    
     for cmd, desc in commands:
         embed.add_field(name=cmd, value=desc, inline=False)
-    
-    embed.set_footer(text="by Ilya Vetrov")
-    
     await interaction.response.send_message(embed=embed)
 
-# ==================== ПРЕФИКСНЫЕ КОМАНДЫ ====================
-
+# Префиксные команды
 @bot.command(name='play')
 async def play_command(ctx, *, query):
     interaction = await commands.Context.to_interface(ctx)
     await slash_play(interaction, query)
 
-@bot.command(name='pause')
-async def pause_command(ctx):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_pause(interaction)
-
-@bot.command(name='resume')
-async def resume_command(ctx):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_resume(interaction)
-
-@bot.command(name='skip')
-async def skip_command(ctx):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_skip(interaction)
-
-@bot.command(name='stop')
-async def stop_command(ctx):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_stop(interaction)
-
-@bot.command(name='queue', aliases=['q'])
-async def queue_command(ctx):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_queue(interaction)
-
-@bot.command(name='np', aliases=['now'])
-async def np_command(ctx):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_nowplaying(interaction)
-
-@bot.command(name='volume', aliases=['vol'])
-async def volume_command(ctx, volume: int):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_volume(interaction, volume)
-
-@bot.command(name='clear')
-async def clear_command(ctx):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_clear(interaction)
-
-@bot.command(name='commands', aliases=['h', 'helpme', 'команды'])
-async def commands_list(ctx):
-    interaction = await commands.Context.to_interface(ctx)
-    await slash_help(interaction)
+@bot.command(name='test')
+async def test_command(ctx, *, query):
+    """Тест поиска"""
+    await ctx.send(f"🔍 Тестирую: {query}")
+    
+    try:
+        ydl = yt_dlp.YoutubeDL({'format': 'best', 'quiet': True})
+        result = ydl.extract_info(f"ytsearch5:{query}", download=False)
+        
+        if result and 'entries' in result:
+            await ctx.send(f"✅ Найдено результатов: {len(result['entries'])}")
+            for i, entry in enumerate(result['entries'][:3], 1):
+                await ctx.send(f"{i}. {entry.get('title')} - {entry.get('uploader')}")
+        else:
+            await ctx.send("❌ Ничего не найдено")
+    except Exception as e:
+        await ctx.send(f"❌ Ошибка: {str(e)[:200]}")
 
 @bot.command(name='ping')
 async def ping_command(ctx):
-    latency = round(bot.latency * 1000)
-    embed = discord.Embed(
-        title="иди нахуй сука!",
-        description=f"Задержка: **{latency}ms**",
-        color=0x2ecc71
-    )
-    await ctx.send(embed=embed)
+    await ctx.send(f"иди нахуй сука! {round(bot.latency * 1000)}ms")
 
-@bot.command(name='test')
-async def test_command(ctx, *, url):
-    """Тестовая команда для диагностики"""
-    await ctx.send(f"🔍 Тестирую: {url}")
+# Запуск
+if __name__ == "__main__":
+    token = os.getenv('TOKEN')
+    if not token:
+        print("❌ Токен не найден!")
+        exit(1)
     
-    try:
-        # Проверяем версию
-        result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True)
-        await ctx.send(f"✅ yt-dlp версия: {result.stdout}")
-    except:
-        await ctx.send("❌ yt-dlp не найден")
-    
-    # Пробуем разные методы
-    methods = [
-        ("Прямая ссылка", url),
-        ("С поиском", f"ytsearch:{url}"),
-    ]
-    
-    if 'youtube' in url:
-        video_id = None
-        if 'watch?v=' in url:
-            video_id = url.split('watch?v=')[1].split('&')[0]
-        elif 'youtu.be/' in url:
-            video_id = url.split('youtu.be/')[1].split('?')[0]
-        
-        if video_id:
-            methods.append(("YouTube nocookie", f"https://www.youtube-nocookie.com/watch?v={video_id}"))
-            methods.append(("YouTube embed", f"https://www.youtube.com/embed/{video_id}"))
-    
-    for name, test_url in methods:
-        try:
-            info = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: ytdl.extract_info(test_url, download=False)
-            )
-            if info:
-                if 'entries' in info and len(info['entries']) > 0:
-                    await ctx.send(f"✅ {name}: Найден трек: {info['entries'][0].get('title', '?')}")
-                elif info.get('title'):
-                    await ctx.send(f"✅ {name}: {info.get('title')}")
-                else:
-                    await ctx.send(f"✅ {name}: Информация получена")
-            else:
-                await ctx.send(f"❌ {name}: Не удалось получить информацию")
-        except Exception as e:
-            await ctx.send(f"❌ {name}: Ошибка - {str(e)[:100]}")
-            await asyncio.sleep(1)
-
-# ==================== ЗАПУСК ====================
-
-token = os.getenv('TOKEN')
-
-if not token:
-    print("\n❌ ОШИБКА: Токен не найден!")
-    exit(1)
-
-print("\n✅ Токен найден!")
-print("🔄 Запуск музыкального бота с обходом блокировок...\n")
-
-bot.run(token)
+    print("🚀 Запуск бота...")
+    bot.run(token)
