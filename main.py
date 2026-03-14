@@ -5,12 +5,22 @@ import yt_dlp as youtube_dl
 import asyncio
 import os
 import logging
+import re
 from datetime import datetime
+
+# Spotify импорт (если установлен)
+try:
+    import spotipy
+    from spotipy.oauth2 import SpotifyClientCredentials
+    SPOTIFY_AVAILABLE = True
+except ImportError:
+    SPOTIFY_AVAILABLE = False
+    print("⚠️ Spotify не установлен. Установите: pip install spotipy")
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Настройки для YouTube
+# Настройки для YouTube/SoundCloud (yt-dlp)
 ytdl_format_options = {
     'format': 'bestaudio/best',
     'restrictfilenames': True,
@@ -21,7 +31,10 @@ ytdl_format_options = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0'
+    'source_address': '0.0.0.0',
+    'extract_flat': False,
+    'force-ipv4': True,
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 
 ffmpeg_options = {
@@ -31,34 +44,110 @@ ffmpeg_options = {
 
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
+# Инициализация Spotify (если есть ключи)
+SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
+SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
+
+if SPOTIFY_AVAILABLE and SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
+    try:
+        spotify_client = spotipy.Spotify(client_credentials_manager=SpotifyClientCredentials(
+            client_id=SPOTIFY_CLIENT_ID,
+            client_secret=SPOTIFY_CLIENT_SECRET
+        ))
+        SPOTIFY_ENABLED = True
+        print("✅ Spotify подключен!")
+    except:
+        SPOTIFY_ENABLED = False
+        print("❌ Ошибка подключения Spotify")
+else:
+    SPOTIFY_ENABLED = False
+    print("⚠️ Spotify не настроен. Добавьте SPOTIFY_CLIENT_ID и SPOTIFY_CLIENT_SECRET в переменные окружения")
+
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
         self.data = data
-        self.title = data.get('title')
-        self.url = data.get('url')
-        self.duration = data.get('duration')
-        self.uploader = data.get('uploader')
-        self.thumbnail = data.get('thumbnail')
+        self.title = data.get('title', 'Неизвестно')
+        self.url = data.get('url', '')
+        self.duration = data.get('duration', 0)
+        self.uploader = data.get('uploader', data.get('channel', 'Неизвестно'))
+        self.thumbnail = data.get('thumbnail', data.get('thumbnails', [{}])[-1].get('url') if data.get('thumbnails') else None)
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
         try:
             data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+            
+            if data is None:
+                return None
+                
             if 'entries' in data:
+                # Берем первый трек из плейлиста
                 data = data['entries'][0]
+            
             filename = data['url'] if stream else ytdl.prepare_filename(data)
             return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
         except Exception as e:
             logging.error(f"Ошибка загрузки: {e}")
             return None
 
-# Настройка бота (help_command=None отключает встроенную help)
+def extract_spotify_info(url):
+    """Извлечение информации из Spotify ссылки"""
+    if not SPOTIFY_ENABLED:
+        return None
+    
+    try:
+        # Определяем тип контента
+        if 'track' in url:
+            track_id = url.split('track/')[-1].split('?')[0]
+            track = spotify_client.track(track_id)
+            
+            artists = ', '.join([artist['name'] for artist in track['artists']])
+            query = f"{artists} - {track['name']}"
+            return {
+                'type': 'track',
+                'query': query,
+                'title': f"{artists} - {track['name']}"
+            }
+            
+        elif 'playlist' in url:
+            playlist_id = url.split('playlist/')[-1].split('?')[0]
+            playlist = spotify_client.playlist(playlist_id)
+            return {
+                'type': 'playlist',
+                'name': playlist['name'],
+                'tracks': [
+                    f"{track['track']['artists'][0]['name']} - {track['track']['name']}"
+                    for track in playlist['tracks']['items'][:10]  # Первые 10 треков
+                ]
+            }
+            
+        elif 'album' in url:
+            album_id = url.split('album/')[-1].split('?')[0]
+            album = spotify_client.album(album_id)
+            return {
+                'type': 'album',
+                'name': album['name'],
+                'tracks': [
+                    f"{album['artists'][0]['name']} - {track['name']}"
+                    for track in album['tracks']['items'][:10]  # Первые 10 треков
+                ]
+            }
+    except Exception as e:
+        logging.error(f"Ошибка Spotify: {e}")
+        return None
+
+def is_url(string):
+    """Проверка является ли строка URL"""
+    url_pattern = re.compile(r'https?://(?:www\.)?\S+')
+    return bool(url_pattern.match(string))
+
+# Настройка бота
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
-intents.members = True
+# intents.members = True  # Отключено
 
 class MusicBot(commands.Bot):
     def __init__(self):
@@ -86,13 +175,18 @@ async def on_ready():
     print(f'✅ Музыкальный бот {bot.user} запущен!')
     print(f'{"="*50}')
     print(f'📋 На серверах: {len(bot.guilds)}')
+    print(f'🎵 Поддержка: YouTube, SoundCloud', end='')
+    if SPOTIFY_ENABLED:
+        print(', Spotify (поиск)')
+    else:
+        print('')
     print(f'{"="*50}\n')
     
     await bot.change_presence(activity=discord.Game(name="/help | /play"))
 
 # ==================== СЛЭШ-КОМАНДЫ ====================
 
-@bot.tree.command(name="play", description="🎵 Воспроизвести музыку с YouTube")
+@bot.tree.command(name="play", description="🎵 Воспроизвести музыку (YouTube, SoundCloud, Spotify)")
 async def slash_play(interaction: discord.Interaction, запрос: str):
     """Воспроизвести музыку по ссылке или названию"""
     
@@ -123,17 +217,66 @@ async def slash_play(interaction: discord.Interaction, запрос: str):
     )
     await interaction.followup.send(embed=embed)
     
+    search_query = запрос
+    
+    # Обработка Spotify ссылок
+    if SPOTIFY_ENABLED and ('spotify.com' in запрос):
+        spotify_info = extract_spotify_info(запрос)
+        
+        if spotify_info:
+            if spotify_info['type'] == 'track':
+                search_query = spotify_info['query']
+                embed = discord.Embed(
+                    title="🎵 Spotify трек",
+                    description=f"Ищем: **{spotify_info['title']}**",
+                    color=0x1DB954
+                )
+                await interaction.followup.send(embed=embed)
+            
+            elif spotify_info['type'] in ['playlist', 'album']:
+                embed = discord.Embed(
+                    title=f"📋 Spotify {spotify_info['type']}",
+                    description=f"**{spotify_info['name']}**\nДобавляю первые 10 треков в очередь...",
+                    color=0x1DB954
+                )
+                await interaction.followup.send(embed=embed)
+                
+                for track_query in spotify_info['tracks']:
+                    try:
+                        player = await YTDLSource.from_url(track_query, loop=bot.loop, stream=True)
+                        if player:
+                            queue = get_queue(interaction.guild_id)
+                            queue.append(player)
+                    except:
+                        pass
+                
+                embed = discord.Embed(
+                    title="✅ Плейлист добавлен",
+                    description=f"Добавлено {len(spotify_info['tracks'])} треков в очередь",
+                    color=0x2ecc71
+                )
+                await interaction.followup.send(embed=embed)
+                return
+    
     try:
-        player = await YTDLSource.from_url(запрос, loop=bot.loop, stream=True)
+        player = await YTDLSource.from_url(search_query, loop=bot.loop, stream=True)
         
         if player is None:
-            embed = discord.Embed(
-                title="❌ Ошибка",
-                description="Не удалось найти трек",
-                color=0xe74c3c
-            )
-            await interaction.followup.send(embed=embed)
-            return
+            # Если не нашли по ссылке, пробуем как поисковый запрос
+            if not is_url(search_query):
+                player = await YTDLSource.from_url(f"ytsearch:{search_query}", loop=bot.loop, stream=True)
+            
+            if player is None:
+                embed = discord.Embed(
+                    title="❌ Ошибка",
+                    description="Не удалось найти трек. Попробуйте:\n"
+                              "• Ссылку на YouTube\n"
+                              "• Ссылку на SoundCloud\n"
+                              "• Название трека",
+                    color=0xe74c3c
+                )
+                await interaction.followup.send(embed=embed)
+                return
         
         if voice_client.is_playing():
             queue = get_queue(interaction.guild_id)
@@ -179,7 +322,7 @@ async def slash_play(interaction: discord.Interaction, запрос: str):
     except Exception as e:
         embed = discord.Embed(
             title="❌ Ошибка",
-            description=f"Произошла ошибка: {str(e)[:100]}",
+            description=f"Произошла ошибка: {str(e)[:200]}",
             color=0xe74c3c
         )
         await interaction.followup.send(embed=embed)
@@ -335,7 +478,7 @@ async def slash_queue(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="nowplaying", description="ℹ️ Что играет сейчас")
+@bot.tree.command(name="nowplaying", aliases=["np"], description="ℹ️ Что играет сейчас")
 async def slash_nowplaying(interaction: discord.Interaction):
     voice_client = interaction.guild.voice_client
     
@@ -421,17 +564,23 @@ async def slash_help(interaction: discord.Interaction):
         timestamp=datetime.now()
     )
     
+    platforms = "YouTube, SoundCloud"
+    if SPOTIFY_ENABLED:
+        platforms += ", Spotify"
+    
+    embed.add_field(name="🎵 Поддерживаемые платформы", value=platforms, inline=False)
+    
     commands = [
-        ("`/play [запрос]`", "🎵 Воспроизвести музыку (ссылка или название)"),
-        ("`/pause`", "⏸️ Поставить на паузу"),
+        ("`/play [запрос]`", "🎵 Воспроизвести (ссылка или название)"),
+        ("`/pause`", "⏸️ Пауза"),
         ("`/resume`", "▶️ Продолжить"),
-        ("`/skip`", "⏭️ Пропустить трек"),
-        ("`/stop`", "⏹️ Остановить и отключиться"),
-        ("`/queue`", "📋 Показать очередь"),
-        ("`/nowplaying`", "ℹ️ Что играет сейчас"),
-        ("`/volume [0-100]`", "🔊 Изменить громкость"),
-        ("`/clear`", "🧹 Очистить очередь"),
-        ("`/help`", "📋 Это меню")
+        ("`/skip`", "⏭️ Пропустить"),
+        ("`/stop`", "⏹️ Остановить"),
+        ("`/queue`", "📋 Очередь"),
+        ("`/nowplaying`", "ℹ️ Что играет"),
+        ("`/volume [0-100]`", "🔊 Громкость"),
+        ("`/clear`", "🧹 Очистить"),
+        ("`/help`", "📋 Помощь")
     ]
     
     for cmd, desc in commands:
@@ -497,7 +646,6 @@ async def clear_command(ctx):
     interaction = await commands.Context.to_interface(ctx)
     await slash_clear(interaction)
 
-# ИСПРАВЛЕНО: команда help переименована в commands
 @bot.command(name='commands', aliases=['h', 'helpme', 'команды'])
 async def commands_list(ctx):
     """!commands - показать список команд"""
@@ -509,10 +657,33 @@ async def ping_command(ctx):
     """!ping - проверить задержку бота"""
     latency = round(bot.latency * 1000)
     embed = discord.Embed(
-        title="🏓 Понг!",
+        title="иди нахуй сука!",
         description=f"Задержка: **{latency}ms**",
         color=0x2ecc71
     )
+    await ctx.send(embed=embed)
+
+@bot.command(name='sources')
+async def sources_command(ctx):
+    """!sources - показать поддерживаемые источники"""
+    embed = discord.Embed(
+        title="🎵 Поддерживаемые источники",
+        color=0x3498db
+    )
+    
+    sources = [
+        "✅ **YouTube** (ссылки и поиск)",
+        "✅ **SoundCloud** (ссылки и поиск)",
+    ]
+    
+    if SPOTIFY_ENABLED:
+        sources.append("✅ **Spotify** (треки, плейлисты, альбомы)")
+    else:
+        sources.append("❌ **Spotify** (не настроен)")
+    
+    embed.add_field(name="Музыкальные платформы", value="\n".join(sources), inline=False)
+    embed.add_field(name="📝 Форматы", value="• Ссылки на треки\n• Поиск по названию\n• Spotify конвертация", inline=False)
+    
     await ctx.send(embed=embed)
 
 # ==================== ЗАПУСК ====================
