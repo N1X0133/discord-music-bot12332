@@ -6,16 +6,20 @@ import asyncio
 import os
 import logging
 import re
+import ssl
+import certifi
 from datetime import datetime
 
-# Spotify импорт (если установлен)
+# Исправление SSL ошибок
 try:
-    import spotipy
-    from spotipy.oauth2 import SpotifyClientCredentials
-    SPOTIFY_AVAILABLE = True
-except ImportError:
-    SPOTIFY_AVAILABLE = False
-    print("⚠️ Spotify не установлен. Установите: pip install spotipy")
+    ssl._create_default_https_context = ssl._create_unverified_context
+    print("✅ SSL проверка отключена")
+except:
+    pass
+
+# Устанавливаем сертификаты
+os.environ['SSL_CERT_FILE'] = certifi.where()
+os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +48,15 @@ ffmpeg_options = {
 
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
+# Spotify импорт (если установлен)
+try:
+    import spotipy
+    from spotipy.oauth2 import SpotifyClientCredentials
+    SPOTIFY_AVAILABLE = True
+except ImportError:
+    SPOTIFY_AVAILABLE = False
+    print("⚠️ Spotify не установлен. Установите: pip install spotipy")
+
 # Инициализация Spotify (если есть ключи)
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
@@ -61,7 +74,8 @@ if SPOTIFY_AVAILABLE and SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
         print("❌ Ошибка подключения Spotify")
 else:
     SPOTIFY_ENABLED = False
-    print("⚠️ Spotify не настроен. Добавьте SPOTIFY_CLIENT_ID и SPOTIFY_CLIENT_SECRET в переменные окружения")
+    # Просто информационное сообщение, не ошибка
+    print("ℹ️ Spotify не настроен. YouTube и SoundCloud работают.")
 
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
@@ -177,7 +191,7 @@ async def on_ready():
     print(f'📋 На серверах: {len(bot.guilds)}')
     print(f'🎵 Поддержка: YouTube, SoundCloud', end='')
     if SPOTIFY_ENABLED:
-        print(', Spotify (поиск)')
+        print(', Spotify')
     else:
         print('')
     print(f'{"="*50}\n')
@@ -204,11 +218,26 @@ async def slash_play(interaction: discord.Interaction, запрос: str):
     channel = interaction.user.voice.channel
     voice_client = interaction.guild.voice_client
     
-    if voice_client and voice_client.is_connected():
-        if voice_client.channel != channel:
-            await voice_client.move_to(channel)
-    else:
-        voice_client = await channel.connect()
+    # Исправленное подключение
+    try:
+        if voice_client:
+            if voice_client.channel == channel:
+                # Уже в канале
+                pass
+            else:
+                # Перемещаемся
+                await voice_client.move_to(channel)
+        else:
+            # Подключаемся
+            voice_client = await channel.connect(timeout=20.0, reconnect=True)
+    except Exception as e:
+        embed = discord.Embed(
+            title="❌ Ошибка подключения",
+            description=f"Не удалось подключиться: {str(e)[:100]}",
+            color=0xe74c3c
+        )
+        await interaction.followup.send(embed=embed)
+        return
     
     embed = discord.Embed(
         title="🔍 Поиск...",
@@ -478,7 +507,8 @@ async def slash_queue(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="nowplaying", aliases=["np"], description="ℹ️ Что играет сейчас")
+# ИСПРАВЛЕНО: убрал aliases из слэш-команд
+@bot.tree.command(name="nowplaying", description="ℹ️ Что играет сейчас")
 async def slash_nowplaying(interaction: discord.Interaction):
     voice_client = interaction.guild.voice_client
     
@@ -512,6 +542,11 @@ async def slash_nowplaying(interaction: discord.Interaction):
         embed.set_thumbnail(url=player.thumbnail)
     
     await interaction.response.send_message(embed=embed)
+
+# Добавляем короткую версию как отдельную команду
+@bot.tree.command(name="np", description="ℹ️ Что играет сейчас (сокращенно)")
+async def slash_np(interaction: discord.Interaction):
+    await slash_nowplaying(interaction)
 
 @bot.tree.command(name="volume", description="🔊 Изменить громкость (0-100)")
 async def slash_volume(interaction: discord.Interaction, громкость: int):
@@ -578,6 +613,7 @@ async def slash_help(interaction: discord.Interaction):
         ("`/stop`", "⏹️ Остановить"),
         ("`/queue`", "📋 Очередь"),
         ("`/nowplaying`", "ℹ️ Что играет"),
+        ("`/np`", "ℹ️ Что играет (сокращенно)"),
         ("`/volume [0-100]`", "🔊 Громкость"),
         ("`/clear`", "🧹 Очистить"),
         ("`/help`", "📋 Помощь")
@@ -679,10 +715,10 @@ async def sources_command(ctx):
     if SPOTIFY_ENABLED:
         sources.append("✅ **Spotify** (треки, плейлисты, альбомы)")
     else:
-        sources.append("❌ **Spotify** (не настроен)")
+        sources.append("ℹ️ **Spotify** (не настроен, но YouTube/SoundCloud работают)")
     
     embed.add_field(name="Музыкальные платформы", value="\n".join(sources), inline=False)
-    embed.add_field(name="📝 Форматы", value="• Ссылки на треки\n• Поиск по названию\n• Spotify конвертация", inline=False)
+    embed.add_field(name="📝 Форматы", value="• Ссылки на треки\n• Поиск по названию\n• Spotify конвертация (если настроен)", inline=False)
     
     await ctx.send(embed=embed)
 
