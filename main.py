@@ -54,7 +54,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
             logging.error(f"Ошибка загрузки: {e}")
             return None
 
-# Настройка бота
+# Настройка бота (help_command=None отключает встроенную help)
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
@@ -62,7 +62,7 @@ intents.members = True
 
 class MusicBot(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix='!', intents=intents)
+        super().__init__(command_prefix='!', intents=intents, help_command=None)
     
     async def setup_hook(self):
         await self.tree.sync()
@@ -445,56 +445,68 @@ async def slash_help(interaction: discord.Interaction):
 
 @bot.command(name='play')
 async def play_command(ctx, *, query):
+    """!play [ссылка или запрос] - воспроизвести музыку"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_play(interaction, query)
 
 @bot.command(name='pause')
 async def pause_command(ctx):
+    """!pause - поставить на паузу"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_pause(interaction)
 
 @bot.command(name='resume')
 async def resume_command(ctx):
+    """!resume - продолжить воспроизведение"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_resume(interaction)
 
 @bot.command(name='skip')
 async def skip_command(ctx):
+    """!skip - пропустить текущий трек"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_skip(interaction)
 
 @bot.command(name='stop')
 async def stop_command(ctx):
+    """!stop - остановить и отключиться"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_stop(interaction)
 
-@bot.command(name='queue')
+@bot.command(name='queue', aliases=['q'])
 async def queue_command(ctx):
+    """!queue - показать очередь"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_queue(interaction)
 
-@bot.command(name='np')
+@bot.command(name='np', aliases=['now'])
 async def np_command(ctx):
+    """!np - что играет сейчас"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_nowplaying(interaction)
 
-@bot.command(name='volume')
+@bot.command(name='volume', aliases=['vol'])
 async def volume_command(ctx, volume: int):
+    """!volume [0-100] - изменить громкость"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_volume(interaction, volume)
 
 @bot.command(name='clear')
 async def clear_command(ctx):
+    """!clear - очистить очередь"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_clear(interaction)
 
-@bot.command(name='help')
-async def help_command(ctx):
+# ИСПРАВЛЕНО: команда help переименована в commands
+@bot.command(name='commands', aliases=['h', 'helpme', 'команды'])
+async def commands_list(ctx):
+    """!commands - показать список команд"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_help(interaction)
 
 @bot.command(name='ping')
 async def ping_command(ctx):
+    """!ping - проверить задержку бота"""
     latency = round(bot.latency * 1000)
     embed = discord.Embed(
         title="🏓 Понг!",
@@ -503,7 +515,7 @@ async def ping_command(ctx):
     )
     await ctx.send(embed=embed)
 
-# ==================== ЗАПУСК (ТОЛЬКО ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ) ====================
+# ==================== ЗАПУСК ====================
 
 # Токен берется ТОЛЬКО из переменных окружения
 token = os.getenv('TOKEN')
