@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Дистрибутивы
+dist/
+build/
+*.egg-info/
+
+# Логи
+*.log
+bot.log
+logs/
+
+# Конфиги с секретами
+.env
+config.local.json
+*.secret.json
+
+# Медиа файлы
+*.mp3
+*.wav
+*.ogg
+*.m4a
+*.webm
+*.part
+downloads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Системные
+.DS_Store
+Thumbs.db
