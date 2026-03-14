@@ -1,0 +1,6 @@
+discord.py[voice]
+python-dotenv
+youtube_dl
+pynacl
+ffmpeg-python
+soundcloud-lib
