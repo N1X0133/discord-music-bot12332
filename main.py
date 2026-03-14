@@ -21,16 +21,28 @@ except:
 os.environ['SSL_CERT_FILE'] = certifi.where()
 os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
 
+# Создаем файл куков для YouTube (помогает обойти блокировки)
+def create_cookie_file():
+    try:
+        with open('cookies.txt', 'w') as f:
+            f.write("# Netscape HTTP Cookie File\n")
+            f.write(".youtube.com\tTRUE\t/\tTRUE\t1735689600\tCONSENT\tYES+1\n")
+        print("✅ Cookie файл создан")
+    except:
+        print("⚠️ Не удалось создать cookie файл")
+
+create_cookie_file()
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Настройки для YouTube/SoundCloud (yt-dlp)
+# Настройки для YouTube/SoundCloud (yt-dlp) - УЛУЧШЕННЫЕ
 ytdl_format_options = {
     'format': 'bestaudio/best',
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
-    'ignoreerrors': False,
+    'ignoreerrors': True,
     'logtostderr': False,
     'quiet': True,
     'no_warnings': True,
@@ -38,7 +50,10 @@ ytdl_format_options = {
     'source_address': '0.0.0.0',
     'extract_flat': False,
     'force-ipv4': True,
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'cookiefile': 'cookies.txt',
+    'geo_bypass': True,
+    'geo_bypass_country': 'US',
 }
 
 ffmpeg_options = {
@@ -90,19 +105,34 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
+        
+        # Пробуем разные варианты если это не ссылка
+        search_query = url
+        if not url.startswith('http'):
+            search_query = f"ytsearch:{url}"
+        
         try:
-            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+            print(f"🔍 Пытаюсь загрузить: {search_query}")
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(search_query, download=not stream))
             
             if data is None:
+                print("❌ yt-dlp вернул None")
                 return None
                 
             if 'entries' in data:
-                # Берем первый трек из плейлиста
-                data = data['entries'][0]
+                # Берем первый трек из плейлиста или поиска
+                if len(data['entries']) > 0:
+                    data = data['entries'][0]
+                else:
+                    print("❌ Пустой плейлист/поиск")
+                    return None
             
             filename = data['url'] if stream else ytdl.prepare_filename(data)
+            print(f"✅ Успешно загружено: {data.get('title', 'Неизвестно')}")
             return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+            
         except Exception as e:
+            print(f"❌ Ошибка загрузки: {str(e)[:200]}")
             logging.error(f"Ошибка загрузки: {e}")
             return None
 
@@ -721,6 +751,36 @@ async def sources_command(ctx):
     embed.add_field(name="📝 Форматы", value="• Ссылки на треки\n• Поиск по названию\n• Spotify конвертация (если настроен)", inline=False)
     
     await ctx.send(embed=embed)
+
+# ==================== ТЕСТОВАЯ КОМАНДА ====================
+
+@bot.command(name='test')
+async def test_command(ctx, *, url):
+    """Тестовая команда для диагностики проблем"""
+    await ctx.send(f"🔍 Тестирую ссылку: {url}")
+    
+    try:
+        import subprocess
+        result = subprocess.run(['yt-dlp', '--version'], capture_output=True, text=True)
+        await ctx.send(f"✅ yt-dlp версия: {result.stdout}")
+    except:
+        await ctx.send("❌ yt-dlp не найден")
+    
+    try:
+        # Пробуем просто получить информацию без загрузки
+        info = await asyncio.get_event_loop().run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+        if info:
+            if 'entries' in info:
+                await ctx.send(f"📋 Найдено треков: {len(info['entries'])}")
+                if len(info['entries']) > 0:
+                    first = info['entries'][0]
+                    await ctx.send(f"🎵 Первый трек: {first.get('title', 'Неизвестно')}")
+            else:
+                await ctx.send(f"🎵 Трек: {info.get('title', 'Неизвестно')}")
+        else:
+            await ctx.send("❌ Информация не получена")
+    except Exception as e:
+        await ctx.send(f"❌ Ошибка: {str(e)[:200]}")
 
 # ==================== ЗАПУСК ====================
 
