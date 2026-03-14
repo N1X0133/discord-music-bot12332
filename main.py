@@ -3,7 +3,6 @@ from discord.ext import commands
 from discord import app_commands
 import yt_dlp as youtube_dl
 import asyncio
-import json
 import os
 import logging
 from datetime import datetime
@@ -55,7 +54,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
             logging.error(f"Ошибка загрузки: {e}")
             return None
 
-# Настройка бота (как в вашем примере)
+# Настройка бота
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
@@ -71,7 +70,7 @@ class MusicBot(commands.Bot):
 
 bot = MusicBot()
 
-# Очередь песен (как база данных)
+# Очередь песен
 queues = {}
 
 def get_queue(guild_id):
@@ -91,13 +90,12 @@ async def on_ready():
     
     await bot.change_presence(activity=discord.Game(name="/help | /play"))
 
-# ==================== СЛЭШ-КОМАНДЫ (как в магазине) ====================
+# ==================== СЛЭШ-КОМАНДЫ ====================
 
 @bot.tree.command(name="play", description="🎵 Воспроизвести музыку с YouTube")
 async def slash_play(interaction: discord.Interaction, запрос: str):
     """Воспроизвести музыку по ссылке или названию"""
     
-    # Проверка на голосовой канал
     if not interaction.user.voice:
         embed = discord.Embed(
             title="❌ Ошибка",
@@ -109,7 +107,6 @@ async def slash_play(interaction: discord.Interaction, запрос: str):
     
     await interaction.response.defer()
     
-    # Получаем или создаем голосовой клиент
     channel = interaction.user.voice.channel
     voice_client = interaction.guild.voice_client
     
@@ -188,7 +185,6 @@ async def slash_play(interaction: discord.Interaction, запрос: str):
         await interaction.followup.send(embed=embed)
 
 def after_play(guild_id):
-    """Что делать после окончания трека"""
     queue = get_queue(guild_id)
     if queue:
         next_player = queue.pop(0)
@@ -275,7 +271,6 @@ async def slash_stop(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
     
-    # Очищаем очередь
     if interaction.guild_id in queues:
         queues[interaction.guild_id] = []
     
@@ -299,7 +294,6 @@ async def slash_queue(interaction: discord.Interaction):
         timestamp=datetime.now()
     )
     
-    # Текущий трек
     if voice_client and voice_client.is_playing() and hasattr(voice_client.source, 'title'):
         current = voice_client.source
         current_text = f"**{current.title}**"
@@ -311,7 +305,6 @@ async def slash_queue(interaction: discord.Interaction):
     else:
         embed.add_field(name="🎵 Сейчас играет", value="```Ничего```", inline=False)
     
-    # Очередь
     if queue:
         queue_text = ""
         total_duration = 0
@@ -448,11 +441,10 @@ async def slash_help(interaction: discord.Interaction):
     
     await interaction.response.send_message(embed=embed)
 
-# ==================== ПРЕФИКСНЫЕ КОМАНДЫ (как в магазине) ====================
+# ==================== ПРЕФИКСНЫЕ КОМАНДЫ ====================
 
 @bot.command(name='play')
 async def play_command(ctx, *, query):
-    """Альтернатива /play через префикс"""
     interaction = await commands.Context.to_interface(ctx)
     await slash_play(interaction, query)
 
@@ -503,7 +495,6 @@ async def help_command(ctx):
 
 @bot.command(name='ping')
 async def ping_command(ctx):
-    """Проверить задержку бота"""
     latency = round(bot.latency * 1000)
     embed = discord.Embed(
         title="🏓 Понг!",
@@ -512,28 +503,26 @@ async def ping_command(ctx):
     )
     await ctx.send(embed=embed)
 
-@bot.command(name='sync')
-async def sync_command(ctx):
-    """Синхронизировать слэш-команды"""
-    if not ctx.author.guild_permissions.administrator:
-        await ctx.send("❌ Только администраторы!")
-        return
-    
-    await bot.tree.sync()
-    embed = discord.Embed(
-        title="✅ Команды синхронизированы",
-        color=0x2ecc71
-    )
-    await ctx.send(embed=embed)
+# ==================== ЗАПУСК (ТОЛЬКО ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ) ====================
 
-# ==================== ЗАПУСК (как в магазине) ====================
-
-# Токен берется из переменных окружения (как в вашем магазине)
+# Токен берется ТОЛЬКО из переменных окружения
 token = os.getenv('TOKEN')
+
 if not token:
-    print("❌ ОШИБКА: Токен не найден в переменных окружения!")
-    print("📝 Добавьте TOKEN в Environment Variables на BotHost")
+    print("\n❌ ОШИБКА: Токен не найден в переменных окружения!")
+    print("=" * 50)
+    print("📝 Инструкция для BotHost:")
+    print("1. Зайдите в панель управления ботом")
+    print("2. Найдите раздел 'Environment Variables'")
+    print("3. Добавьте переменную:")
+    print("   ИМЯ: TOKEN")
+    print("   ЗНАЧЕНИЕ: [ваш токен сюда]")
+    print("=" * 50)
+    print("\n❌ Бот не может запуститься без токена!")
     exit(1)
 
-print("🔄 Запуск музыкального бота...")
+print("\n✅ Токен найден в переменных окружения!")
+print(f"📋 Первые символы токена: {token[:10]}...")
+print("🔄 Запуск музыкального бота...\n")
+
 bot.run(token)
